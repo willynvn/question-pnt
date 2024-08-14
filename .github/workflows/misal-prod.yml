@@ -1,0 +1,74 @@
+name: "Production Deployment"
+
+on:
+  release:
+    types:
+      - released
+      - edited
+      
+env:
+  TAG: "latest-${{ github.run_number }}"
+  PROD_NAMESPACE: "production"
+  PROD_APP_NAME: "aplikasi-golang"
+  GOOGLE_PROJECT: ${{ secrets.GOOGLE_PROJECT }}
+  NODESELECTOR: "cook-kubernetes"
+  SECRET_NAME: "pintu-ssl"
+  PORT_API: 8080
+  
+jobs:
+  production_deploy:
+    runs-on: pintu-runner
+    environment:
+      name: "production"
+      url: "https://aplikasi-golang.pintu.co.id/"
+    steps:
+      - uses: actions/checkout@v3
+      - id: 'auth'
+        uses: 'google-github-actions/auth@v1'
+        with:
+          credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
+      - id: 'get-credentials'
+        uses: 'google-github-actions/get-gke-credentials@v1'
+        with:
+          cluster_name: 'prod-pintu-app-k8s'
+          project_id: ${{ secrets.GOOGLE_PROJECT }}
+          location: 'asia-southeast2'
+      - name: "Docker auth"
+        run: gcloud auth configure-docker ${{ secrets.ARTIFACT_REGISTRY }} --quiet
+      - name: Build and Push To Artifact Registry
+        run: |
+          docker build --pull -t "${{ secrets.ARTIFACT_REGISTRY }}/$GOOGLE_PROJECT/${{ secrets.ARTIFACT_FOLDER_PROD }}/$PROD_APP_NAME:$TAG" .
+          docker push "${{ secrets.ARTIFACT_REGISTRY }}/$GOOGLE_PROJECT/${{ secrets.ARTIFACT_FOLDER_PROD }}/$PROD_APP_NAME:$TAG"
+      - name: Deploy App to GKE
+        run: |
+          kubectl get ns "$PROD_NAMESPACE" 2> /dev/null || kubectl create ns "$PROD_NAMESPACE"
+          sed -i "s#REGISTRY#${{ secrets.ARTIFACT_REGISTRY }}#g" gke-resource/namespace/$PROD_NAMESPACE/gke-file.yaml
+          sed -i "s#PROJECT#${GOOGLE_PROJECT}#g" gke-resource/namespace/$PROD_NAMESPACE/gke-file.yaml
+          sed -i "s#FOLDER#${{ secrets.ARTIFACT_FOLDER_PROD }}#g" gke-resource/namespace/$PROD_NAMESPACE/gke-file.yaml
+          sed -i "s#APP_NAME#${PROD_APP_NAME}#g" gke-resource/namespace/$PROD_NAMESPACE/gke-file.yaml
+          sed -i "s#NAMESPACE#${PROD_NAMESPACE}#g" gke-resource/namespace/$PROD_NAMESPACE/gke-file.yaml
+          sed -i "s#TAG#${TAG}#g" gke-resource/namespace/$PROD_NAMESPACE/gke-file.yaml
+          sed -i "s#NODESELECTOR#${NODESELECTOR}#g" gke-resource/namespace/$PROD_NAMESPACE/gke-file.yaml
+          kubectl apply -f gke-resource/namespace/$PROD_NAMESPACE/gke-file.yaml
+      - name: Check secret for https
+        id: get_secret_status
+        run: echo "result=$(kubectl get secret $SECRET_NAME -n $PROD_NAMESPACE -o name)" >> $GITHUB_OUTPUT
+      - name: Create Secret for TLS
+        if: steps.get_secret_status.outputs.result == false
+        run: |
+          sed -i "s#SECRET_NAME#${SECRET_NAME}#g" gke-resource/namespace/$PROD_NAMESPACE/secret.yaml
+          sed -i "s#NAMESPACE#${PROD_NAMESPACE}#g" gke-resource/namespace/$PROD_NAMESPACE/secret.yaml
+          sed -i "s#TLS_CRT#${{ secrets.TLS_CRT }}#g" gke-resource/namespace/$PROD_NAMESPACE/secret.yaml
+          sed -i "s#TLS_KEY#${{ secrets.TLS_KEY }}#g" gke-resource/namespace/$PROD_NAMESPACE/secret.yaml
+          kubectl apply -f gke-resource/namespace/$PROD_NAMESPACE/secret.yaml
+      - name: Check Ingress
+        id: get_ingress_status
+        run: echo "result=$(kubectl get ingress $PROD_APP_NAME -n $PROD_NAMESPACE -o name)" >> $GITHUB_OUTPUT
+      - name: Create Ingress
+        if: steps.get_ingress_status.outputs.result == false
+        run: |
+          sed -i "s#APP_NAME#${PROD_APP_NAME}#g" gke-resource/namespace/$PROD_NAMESPACE/ingress.yaml
+          sed -i "s#NAMESPACE#${PROD_NAMESPACE}#g" gke-resource/namespace/$PROD_NAMESPACE/ingress.yaml
+          sed -i "s#PORT#${PORT_API}#g" gke-resource/namespace/$PROD_NAMESPACE/ingress.yaml
+          sed -i "s#SECRET_NAME#${SECRET_NAME}#g" gke-resource/namespace/$PROD_NAMESPACE/ingress.yaml
+          kubectl apply -f gke-resource/namespace/$PROD_NAMESPACE/ingress.yaml

@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: APP_NAME
+  name: APP_NAME
+  namespace: NAMESPACE
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: APP_NAME
+  template:
+    metadata:
+      labels:
+        app: APP_NAME
+    spec:
+      containers:
+          image: REGISTRY/PROJECT/FOLDER/APP_NAME:TAG
+          imagePullPolicy: IfNotPresent
+          name: APP_NAME
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+      nodeSelector:
+        cloud.google.com/gke-nodepool: NODESELECTOR
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: APP_NAME
+  name: APP_NAME
+  namespace: NAMESPACE
+spec:
+  ports:
+    - name: 8080-tcp
+      port: 8080
+      protocol: TCP
+      targetPort: 8080
+  selector:
+    app: APP_NAME
+  type: ClusterIP

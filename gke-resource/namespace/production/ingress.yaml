@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$1$2
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+  name: APP_NAME
+  namespace: NAMESPACE
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: APP_NAME.pintu.co.id
+    http:
+      paths:
+      - backend:
+          service:
+            name: APP_NAME
+            port:
+              number: PORT
+        path: /()(.*)
+        pathType: Prefix
+  tls:
+  - hosts:
+    - '*.pintu.co.id'
+    - 'APP_NAME.pintu.co.id'
+    secretName: SECRET_NAME
